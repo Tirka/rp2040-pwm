@@ -3,9 +3,14 @@
 
 mod button_duty;
 
-use button_duty::{btn_duty_down, btn_duty_up};
 use embassy_executor::Spawner;
-use embassy_rp::pwm::{Config, Pwm, SetDutyCycle};
+use embassy_rp::{
+    bind_interrupts,
+    peripherals::PIO0,
+    pio::{InterruptHandler, Pio},
+    pio_programs::rotary_encoder::{PioEncoder, PioEncoderProgram},
+    pwm::{Config, Pwm, SetDutyCycle},
+};
 use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, mutex::Mutex};
 use portable_atomic::AtomicU8;
 use {defmt_rtt as _, panic_probe as _};
@@ -16,6 +21,10 @@ const DUTY_START: u8 = 100; // percent
 
 static PWM: PwmType = Mutex::new(None);
 static DUTY_CYCLE: AtomicU8 = AtomicU8::new(DUTY_START);
+
+bind_interrupts!(struct Irqs {
+    PIO0_IRQ_0 => InterruptHandler<PIO0>;
+});
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
@@ -35,6 +44,12 @@ async fn main(spawner: Spawner) {
         *PWM.lock().await = Some(pwm);
     }
 
-    spawner.spawn(btn_duty_down(p.PIN_4.into())).unwrap();
-    spawner.spawn(btn_duty_up(p.PIN_9.into())).unwrap();
+    let Pio {
+        mut common, sm0, ..
+    } = Pio::new(p.PIO0, Irqs);
+    let prg = PioEncoderProgram::new(&mut common);
+    let encoder = PioEncoder::new(&mut common, sm0, p.PIN_4, p.PIN_5, &prg);
+
+    // spawner.must_spawn(button_duty::pressus(p.PIN_27.into()));
+    spawner.must_spawn(button_duty::handle_encoder(encoder));
 }

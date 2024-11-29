@@ -1,55 +1,54 @@
 use core::sync::atomic::Ordering;
 
 use defmt::info;
-use embassy_rp::gpio::{AnyPin, Input, Pull};
+// use embassy_rp::gpio::{AnyPin, Input, Pull};
+use embassy_rp::peripherals::PIO0;
+use embassy_rp::pio_programs::rotary_encoder::{Direction, PioEncoder};
 use embassy_rp::pwm::SetDutyCycle;
+// use embassy_time::Timer;
 
 use crate::{DUTY_CYCLE, PWM};
 
-const DUTY_STEP: u8 = 10; // percent
+const DUTY_STEP: u8 = 2; // percent
 
-/// Increase the PWM duty cycle by 10% when the input pin goes low.
+// #[embassy_executor::task]
+// pub async fn pressus(input_pin: AnyPin) {
+//     let mut p = Input::new(input_pin, Pull::Up);
+//     p.set_schmitt(true);
+
+//     loop {
+//         p.wait_for_low().await;
+
+//         info!("pressed");
+
+//         p.wait_for_high().await;
+//         Timer::after_millis(10).await;
+//     }
+// }
+
 #[embassy_executor::task]
-pub async fn btn_duty_up(input_pin: AnyPin) {
-    button_duty(input_pin, up).await;
-}
-
-/// Decrease the PWM duty cycle by 10% when the input pin goes low.
-#[embassy_executor::task]
-pub async fn btn_duty_down(input_pin: AnyPin) {
-    button_duty(input_pin, down).await;
-}
-
-async fn button_duty(input_pin: AnyPin, action: fn(u8) -> u8) {
-    let mut p = Input::new(input_pin, Pull::Up);
-    p.set_schmitt(true);
-
+pub async fn handle_encoder(mut encoder: PioEncoder<'static, PIO0, 0>) {
     loop {
-        p.wait_for_falling_edge().await;
+        let mut new_duty = DUTY_CYCLE.load(Ordering::Acquire);
+        match encoder.read().await {
+            Direction::Clockwise => {
+                new_duty += DUTY_STEP;
+                if new_duty > 100 {
+                    new_duty = 100
+                }
+            }
+            Direction::CounterClockwise => {
+                new_duty = new_duty.saturating_sub(DUTY_STEP);
+            }
+        };
 
-        let dc = action(DUTY_CYCLE.load(Ordering::Acquire));
-        DUTY_CYCLE.store(dc, Ordering::Release);
-
-        info!("Setting PWM to {}%", dc);
-        {
-            PWM.lock()
-                .await
-                .as_mut()
-                .unwrap()
-                .set_duty_cycle_percent(dc)
-                .unwrap();
-        }
+        info!("Setting PWM to {}%", new_duty);
+        DUTY_CYCLE.store(new_duty, Ordering::Release);
+        PWM.lock()
+            .await
+            .as_mut()
+            .unwrap()
+            .set_duty_cycle_percent(new_duty)
+            .unwrap();
     }
-}
-
-fn up(current_duty: u8) -> u8 {
-    let new_duty = current_duty.saturating_add(DUTY_STEP);
-    if new_duty > 100 {
-        return 100;
-    }
-    return new_duty;
-}
-
-fn down(current_duty: u8) -> u8 {
-    current_duty.saturating_sub(DUTY_STEP)
 }
