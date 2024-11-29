@@ -11,10 +11,10 @@ use portable_atomic::AtomicU8;
 use {defmt_rtt as _, panic_probe as _};
 
 type PwmType = Mutex<ThreadModeRawMutex, Option<Pwm<'static>>>;
-static PWM: PwmType = Mutex::new(None);
 
 const DUTY_START: u8 = 100; // percent
 
+static PWM: PwmType = Mutex::new(None);
 static DUTY_CYCLE: AtomicU8 = AtomicU8::new(DUTY_START);
 
 #[embassy_executor::main]
